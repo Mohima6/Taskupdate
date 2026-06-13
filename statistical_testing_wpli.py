@@ -8,8 +8,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from itertools import combinations
 from collections import Counter
-
-# ========== CONFIGURATION ==========
 DATASET_PATH = r"C:\Users\mohimaCHAKRABORTY\Taskupdate"
 CONN_METRIC = "wPLI"
 CONN_DIR = os.path.join(DATASET_PATH, "connectivity", CONN_METRIC)
@@ -18,14 +16,11 @@ STATS_OUTPUT = os.path.join(DATASET_PATH, "statistics", CONN_METRIC)
 FREQUENCY_BANDS = ["delta", "theta", "alpha", "beta", "gamma"]
 ALPHA = 0.05
 
-# Create output folders
 for band in FREQUENCY_BANDS:
     band_out = os.path.join(STATS_OUTPUT, band)
     os.makedirs(band_out, exist_ok=True)
     os.makedirs(os.path.join(band_out, "figures"), exist_ok=True)
 
-
-# ========== HELPER FUNCTIONS ==========
 def cohen_d(x, y):
     nx, ny = len(x), len(y)
     pooled_std = np.sqrt(((nx - 1) * np.var(x, ddof=1) + (ny - 1) * np.var(y, ddof=1)) / (nx + ny - 2))
@@ -33,12 +28,10 @@ def cohen_d(x, y):
         return 0.0
     return (np.mean(x) - np.mean(y)) / pooled_std
 
-
 def rank_biserial(x, y):
     u, _ = stats.mannwhitneyu(x, y, alternative='two-sided')
     n1, n2 = len(x), len(y)
     return 1 - (2 * u) / (n1 * n2)
-
 
 def load_and_average_subject(band_dir, subject_base):
     """Load all epoch matrices for a subject and average across epochs."""
@@ -52,8 +45,6 @@ def load_and_average_subject(band_dir, subject_base):
         matrices.append(mat)
     return np.mean(matrices, axis=0)
 
-
-# ========== MAIN LOOP OVER BANDS ==========
 print(f"Starting statistical testing for {CONN_METRIC}...\n")
 
 for band in FREQUENCY_BANDS:
@@ -63,13 +54,11 @@ for band in FREQUENCY_BANDS:
         print(f"  Band folder {band_dir} not found, skipping")
         continue
 
-    # Find label files (each gives one subject)
     label_files = [f for f in os.listdir(band_dir) if f.endswith("_labels.npy")]
     if not label_files:
         print(f"  No label files found in {band_dir}, skipping")
         continue
 
-    # Collect subject base names and labels
     subject_base_names = []
     labels_list = []
     for lf in label_files:
@@ -79,7 +68,6 @@ for band in FREQUENCY_BANDS:
             subject_base_names.append(base)
             labels_list.append(labels[0])
 
-    # Load and average connectivity matrices per subject
     subject_matrices = []
     valid_labels = []
     valid_bases = []
@@ -94,7 +82,6 @@ for band in FREQUENCY_BANDS:
         print(f"  No valid subjects for {band}")
         continue
 
-    # --- Handle inconsistent channel counts ---
     shapes = [mat.shape[0] for mat in subject_matrices]
     unique_shapes = set(shapes)
     if len(unique_shapes) > 1:
@@ -127,7 +114,6 @@ for band in FREQUENCY_BANDS:
     healthy_indices = [i for i, lab in enumerate(valid_labels) if lab == 0]
     mdd_indices = [i for i, lab in enumerate(valid_labels) if lab == 1]
 
-    # Prepare channel pairs
     pairs = list(combinations(range(n_channels), 2))
     results = []
 
@@ -136,11 +122,9 @@ for band in FREQUENCY_BANDS:
         values_healthy = [subject_matrices[idx][i, j] for idx in healthy_indices]
         values_mdd = [subject_matrices[idx][i, j] for idx in mdd_indices]
 
-        # Normality test
         p_norm_h = stats.shapiro(values_healthy)[1] if len(values_healthy) >= 3 else 0.5
         p_norm_m = stats.shapiro(values_mdd)[1] if len(values_mdd) >= 3 else 0.5
         both_normal = (p_norm_h > 0.05 and p_norm_m > 0.05) and len(values_healthy) >= 3 and len(values_mdd) >= 3
-
         if both_normal:
             _, p_val = stats.ttest_ind(values_healthy, values_mdd, equal_var=False)
             effect = cohen_d(values_healthy, values_mdd)
@@ -174,7 +158,7 @@ for band in FREQUENCY_BANDS:
     sig_df.to_csv(sig_path, index=False)
     print(f"  Significant connections: {len(sig_df)} / {len(df)}")
 
-    # Effect size matrix
+
     effect_mat = np.zeros((n_channels, n_channels))
     for _, row in df.iterrows():
         i, j = int(row["channel_i"]), int(row["channel_j"])
@@ -182,7 +166,6 @@ for band in FREQUENCY_BANDS:
         effect_mat[j, i] = row["effect_size"]
     np.save(os.path.join(STATS_OUTPUT, band, "effect_sizes.npy"), effect_mat)
 
-    # Figures
     fig_dir = os.path.join(STATS_OUTPUT, band, "figures")
 
     if len(sig_df) > 0:
