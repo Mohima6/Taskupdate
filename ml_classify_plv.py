@@ -16,20 +16,15 @@ from collections import Counter
 import json
 import warnings
 warnings.filterwarnings('ignore')
-
-# ========== CONFIGURATION ==========
 DATASET_PATH = r"C:\Users\mohimaCHAKRABORTY\Taskupdate"
-CONN_METRIC = "PLV"   # Change to "PLI" or "wPLI" for other runs
+CONN_METRIC = "PLV"   
 CONN_BASE = os.path.join(DATASET_PATH, "connectivity", CONN_METRIC)
 RESULT_BASE = os.path.join(DATASET_PATH, "machine_learning", "results", CONN_METRIC)
 os.makedirs(RESULT_BASE, exist_ok=True)
-
 FREQUENCY_BANDS = ["delta", "theta", "alpha", "beta", "gamma"]
 RANDOM_STATE = 42
 N_OUTER_FOLDS = 5
 N_INNER_FOLDS = 5
-
-# Define classifiers and hyperparameter grids
 classifiers = {
     "LogisticRegression": {
         "model": LogisticRegression(random_state=RANDOM_STATE, max_iter=1000),
@@ -48,8 +43,6 @@ classifiers = {
         "params": {"C": [0.1, 1, 10], "gamma": ["scale", "auto"], "kernel": ["rbf", "linear"]}
     }
 }
-
-# Try to add XGBoost if available
 try:
     from xgboost import XGBClassifier
     classifiers["XGBoost"] = {
@@ -59,13 +52,9 @@ try:
     print("XGBoost available.\n")
 except ImportError:
     print("XGBoost not installed – skipping.\n")
-
-# Helper: specificity
 def specificity_score_func(y_true, y_pred):
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
     return tn / (tn + fp) if (tn + fp) > 0 else 0
-
-# Helper: load and average subject matrices
 def load_and_average_subject(band_dir, subject_base, metric_lower):
     epoch_files = [f for f in os.listdir(band_dir)
                    if f.startswith(subject_base) and f.endswith(f"_{metric_lower}.npy")]
@@ -73,22 +62,16 @@ def load_and_average_subject(band_dir, subject_base, metric_lower):
         return None
     matrices = [np.load(os.path.join(band_dir, f)) for f in epoch_files]
     return np.mean(matrices, axis=0)
-
-# Main loop over bands
 for band in FREQUENCY_BANDS:
     print(f"\n{'='*50}\n{CONN_METRIC} - {band}\n{'='*50}")
     band_dir = os.path.join(CONN_BASE, band)
     if not os.path.exists(band_dir):
         print(f"  Folder not found: {band_dir}")
         continue
-
-    # Find label files
     label_files = [f for f in os.listdir(band_dir) if f.endswith("_labels.npy")]
     if not label_files:
         print("  No label files found.")
         continue
-
-    # Get subject base names and labels
     subject_base_names = []
     labels_list = []
     for lf in label_files:
@@ -97,8 +80,6 @@ for band in FREQUENCY_BANDS:
         if len(labels) > 0:
             subject_base_names.append(base)
             labels_list.append(labels[0])
-
-    # Load averaged matrices for each subject
     subject_matrices = []
     valid_labels = []
     for base, lab in zip(subject_base_names, labels_list):
@@ -106,12 +87,9 @@ for band in FREQUENCY_BANDS:
         if mat is not None:
             subject_matrices.append(mat)
             valid_labels.append(lab)
-
     if len(subject_matrices) == 0:
         print("  No valid subject matrices.")
         continue
-
-    # --- Handle inconsistent channel counts ---
     shapes = [m.shape[0] for m in subject_matrices]
     if len(set(shapes)) > 1:
         common_n = Counter(shapes).most_common(1)[0][0]
@@ -122,14 +100,11 @@ for band in FREQUENCY_BANDS:
         print(f"  Inconsistent channels – kept {common_n} channels, {len(subject_matrices)} subjects.")
     else:
         common_n = shapes[0]
-
     n_channels = common_n
     n_subjects = len(subject_matrices)
     n_healthy = valid_labels.count(0)
     n_mdd = valid_labels.count(1)
     print(f"  Subjects: {n_subjects} (Healthy: {n_healthy}, MDD: {n_mdd})")
-
-    # Build feature matrix (upper triangle)
     pairs = list(combinations(range(n_channels), 2))
     n_features = len(pairs)
     X = np.zeros((n_subjects, n_features))
@@ -138,40 +113,27 @@ for band in FREQUENCY_BANDS:
             X[i, f] = mat[p, q]
     y = np.array(valid_labels)
     print(f"  Features: {n_features} (from {n_channels} channels)")
-
-    # Create band result folder
     band_result_dir = os.path.join(RESULT_BASE, band)
     os.makedirs(band_result_dir, exist_ok=True)
-
-    # --- Nested cross‑validation for each classifier ---
     outer_cv = StratifiedKFold(n_splits=N_OUTER_FOLDS, shuffle=True, random_state=RANDOM_STATE)
     all_results = {}
-
     for clf_name, clf_dict in classifiers.items():
         print(f"\n  Training {clf_name}...")
         model = clf_dict["model"]
         param_grid = clf_dict["params"]
-
-        # Storage for this classifier
         acc_list, sens_list, spec_list, prec_list, f1_list, auc_list = [], [], [], [], [], []
         all_y_true, all_y_pred, all_y_proba = [], [], []
         best_params_list = []
-
         for train_idx, test_idx in outer_cv.split(X, y):
             X_train, X_test = X[train_idx], X[test_idx]
             y_train, y_test = y[train_idx], y[test_idx]
-
-            # Inner CV for hyperparameter tuning
             inner_cv = StratifiedKFold(n_splits=N_INNER_FOLDS, shuffle=True, random_state=RANDOM_STATE)
             grid_search = GridSearchCV(model, param_grid, cv=inner_cv, scoring='roc_auc', n_jobs=-1)
             grid_search.fit(X_train, y_train)
             best_model = grid_search.best_estimator_
             best_params_list.append(grid_search.best_params_)
-
             y_pred = best_model.predict(X_test)
             y_proba = best_model.predict_proba(X_test)[:, 1] if hasattr(best_model, "predict_proba") else None
-
-            # Metrics
             acc_list.append(accuracy_score(y_test, y_pred))
             sens_list.append(recall_score(y_test, y_pred, zero_division=0))
             spec_list.append(specificity_score_func(y_test, y_pred))
@@ -181,13 +143,10 @@ for band in FREQUENCY_BANDS:
                 auc_list.append(roc_auc_score(y_test, y_proba))
             else:
                 auc_list.append(np.nan)
-
             all_y_true.extend(y_test)
             all_y_pred.extend(y_pred)
             if y_proba is not None:
                 all_y_proba.extend(y_proba)
-
-        # Summarise
         results = {
             "accuracy": f"{np.mean(acc_list):.4f} ± {np.std(acc_list):.4f}",
             "sensitivity": f"{np.mean(sens_list):.4f} ± {np.std(sens_list):.4f}",
@@ -198,12 +157,8 @@ for band in FREQUENCY_BANDS:
             "best_params": best_params_list
         }
         all_results[clf_name] = results
-
-        # Save classification report
         report = classification_report(all_y_true, all_y_pred, output_dict=True, zero_division=0)
         pd.DataFrame(report).transpose().to_csv(os.path.join(band_result_dir, f"{clf_name}_classification_report.csv"))
-
-        # Confusion matrix plot
         cm = confusion_matrix(all_y_true, all_y_pred)
         plt.figure(figsize=(5,4))
         sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['Healthy','MDD'], yticklabels=['Healthy','MDD'])
@@ -212,8 +167,6 @@ for band in FREQUENCY_BANDS:
         plt.tight_layout()
         plt.savefig(os.path.join(band_result_dir, f"{clf_name}_confusion_matrix.png"))
         plt.close()
-
-        # ROC curve if probabilities exist
         if len(all_y_proba) > 0:
             fpr, tpr, _ = roc_curve(all_y_true, all_y_proba)
             auc_val = np.mean([a for a in auc_list if not np.isnan(a)]) if auc_list else 0
@@ -226,18 +179,12 @@ for band in FREQUENCY_BANDS:
             plt.tight_layout()
             plt.savefig(os.path.join(band_result_dir, f"{clf_name}_roc_curve.png"))
             plt.close()
-
-        # Save best hyperparameters
         with open(os.path.join(band_result_dir, f"{clf_name}_best_params.json"), "w") as f:
             json.dump(best_params_list, f, indent=4)
-
         print(f"    AUC = {results['roc_auc']}")
-
-    # Save model comparison for this band
     summary_df = pd.DataFrame(all_results).T
     summary_df.to_csv(os.path.join(band_result_dir, "model_comparison.csv"))
     print(f"\n  Saved all results for {band} in {band_result_dir}")
-
 print("\n" + "="*50)
 print(f"All classification tasks for {CONN_METRIC} completed.")
 print(f"Results saved in: {RESULT_BASE}")
