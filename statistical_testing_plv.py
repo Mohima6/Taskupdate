@@ -8,38 +8,26 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from itertools import combinations
 from collections import Counter
-
-# ========== CONFIGURATION ==========
 DATASET_PATH = r"C:\Users\mohimaCHAKRABORTY\Taskupdate"
-CONN_METRIC = "PLV"  # Change to "PLI" or "wPLI" later
+CONN_METRIC = "PLV"  
 CONN_DIR = os.path.join(DATASET_PATH, "connectivity", CONN_METRIC)
 STATS_OUTPUT = os.path.join(DATASET_PATH, "statistics", CONN_METRIC)
-
 FREQUENCY_BANDS = ["delta", "theta", "alpha", "beta", "gamma"]
 ALPHA = 0.05
-
-# Create output folders
 for band in FREQUENCY_BANDS:
     band_out = os.path.join(STATS_OUTPUT, band)
     os.makedirs(band_out, exist_ok=True)
     os.makedirs(os.path.join(band_out, "figures"), exist_ok=True)
-
-
-# ========== HELPER FUNCTIONS ==========
 def cohen_d(x, y):
     nx, ny = len(x), len(y)
     pooled_std = np.sqrt(((nx - 1) * np.var(x, ddof=1) + (ny - 1) * np.var(y, ddof=1)) / (nx + ny - 2))
     if pooled_std == 0:
         return 0.0
     return (np.mean(x) - np.mean(y)) / pooled_std
-
-
 def rank_biserial(x, y):
     u, _ = stats.mannwhitneyu(x, y, alternative='two-sided')
     n1, n2 = len(x), len(y)
     return 1 - (2 * u) / (n1 * n2)
-
-
 def load_and_average_subject(band_dir, subject_base):
     """Load all epoch matrices for a subject and average across epochs."""
     epoch_files = [f for f in os.listdir(band_dir)
@@ -51,25 +39,17 @@ def load_and_average_subject(band_dir, subject_base):
         mat = np.load(os.path.join(band_dir, ef))
         matrices.append(mat)
     return np.mean(matrices, axis=0)
-
-
-# ========== MAIN LOOP OVER BANDS ==========
 print(f"Starting statistical testing for {CONN_METRIC}...\n")
-
 for band in FREQUENCY_BANDS:
     print(f"\n=== Processing band: {band} ===")
     band_dir = os.path.join(CONN_DIR, band)
     if not os.path.exists(band_dir):
         print(f"  Band folder {band_dir} not found, skipping")
         continue
-
-    # Find label files (each gives one subject)
     label_files = [f for f in os.listdir(band_dir) if f.endswith("_labels.npy")]
     if not label_files:
         print(f"  No label files found in {band_dir}, skipping")
         continue
-
-    # Collect subject base names and labels
     subject_base_names = []
     labels_list = []
     for lf in label_files:
@@ -77,9 +57,7 @@ for band in FREQUENCY_BANDS:
         labels = np.load(os.path.join(band_dir, lf))
         if len(labels) > 0:
             subject_base_names.append(base)
-            labels_list.append(labels[0])  # all epochs same label
-
-    # Load and average connectivity matrices per subject
+            labels_list.append(labels[0])  
     subject_matrices = []
     valid_labels = []
     valid_bases = []
@@ -89,21 +67,16 @@ for band in FREQUENCY_BANDS:
             subject_matrices.append(avg_mat)
             valid_labels.append(lab)
             valid_bases.append(base)
-
     if len(subject_matrices) == 0:
         print(f"  No valid subjects for {band}")
         continue
-
-    # --- Handle inconsistent channel counts ---
     shapes = [mat.shape[0] for mat in subject_matrices]
     unique_shapes = set(shapes)
     if len(unique_shapes) > 1:
-        # Find the most common channel count
         shape_counts = Counter(shapes)
         common_n = shape_counts.most_common(1)[0][0]
         print(f"  Inconsistent channel counts: {dict(shape_counts)}")
         print(f"  Keeping only subjects with {common_n} channels")
-        # Filter
         filtered = [(mat, lab, base) for mat, lab, base in zip(subject_matrices, valid_labels, valid_bases)
                     if mat.shape[0] == common_n]
         if not filtered:
@@ -116,7 +89,6 @@ for band in FREQUENCY_BANDS:
         n_channels = common_n
     else:
         n_channels = shapes[0]
-
     n_subj = len(subject_matrices)
     healthy_count = valid_labels.count(0)
     mdd_count = valid_labels.count(1)
@@ -129,17 +101,15 @@ for band in FREQUENCY_BANDS:
     healthy_indices = [i for i, lab in enumerate(valid_labels) if lab == 0]
     mdd_indices = [i for i, lab in enumerate(valid_labels) if lab == 1]
 
-    # Prepare channel pairs
     pairs = list(combinations(range(n_channels), 2))
     results = []
 
     print(f"  Computing statistics for {len(pairs)} channel pairs...")
     for (i, j) in tqdm(pairs, desc="  Channel pairs"):
-        # Extract values for this pair across subjects
         values_healthy = [subject_matrices[idx][i, j] for idx in healthy_indices]
         values_mdd = [subject_matrices[idx][i, j] for idx in mdd_indices]
 
-        # Normality test (only if enough samples)
+
         p_norm_h = stats.shapiro(values_healthy)[1] if len(values_healthy) >= 3 else 0.5
         p_norm_m = stats.shapiro(values_mdd)[1] if len(values_mdd) >= 3 else 0.5
         both_normal = (p_norm_h > 0.05 and p_norm_m > 0.05) and len(values_healthy) >= 3 and len(values_mdd) >= 3
@@ -163,13 +133,13 @@ for band in FREQUENCY_BANDS:
             "normality_p_mdd": p_norm_m
         })
 
-    # Convert to DataFrame and apply FDR
+    
     df = pd.DataFrame(results)
     _, p_fdr = fdrcorrection(df["p_raw"].values, alpha=ALPHA)
     df["p_fdr"] = p_fdr
     df["significant_fdr"] = df["p_fdr"] < ALPHA
 
-    # Save results
+    
     csv_path = os.path.join(STATS_OUTPUT, band, "results.csv")
     df.to_csv(csv_path, index=False)
     print(f"  Saved {csv_path}")
@@ -178,8 +148,6 @@ for band in FREQUENCY_BANDS:
     sig_path = os.path.join(STATS_OUTPUT, band, "significant_connections.csv")
     sig_df.to_csv(sig_path, index=False)
     print(f"  Significant connections: {len(sig_df)} / {len(df)}")
-
-    # Save effect size matrix
     effect_mat = np.zeros((n_channels, n_channels))
     for _, row in df.iterrows():
         i, j = int(row["channel_i"]), int(row["channel_j"])
@@ -187,10 +155,8 @@ for band in FREQUENCY_BANDS:
         effect_mat[j, i] = row["effect_size"]
     np.save(os.path.join(STATS_OUTPUT, band, "effect_sizes.npy"), effect_mat)
 
-    # ========== FIGURES ==========
+    
     fig_dir = os.path.join(STATS_OUTPUT, band, "figures")
-
-    # Figure 1: Top 10 significant connections - boxplots
     if len(sig_df) > 0:
         top_sig = sig_df.nsmallest(10, "p_fdr")
         n_plot = min(10, len(top_sig))
@@ -211,7 +177,7 @@ for band in FREQUENCY_BANDS:
         plt.close()
         print(f"  Saved boxplots_top10.png")
 
-    # Figure 2: Effect size heatmap
+    
     plt.figure(figsize=(10, 8))
     mask = np.triu(np.ones_like(effect_mat, dtype=bool), k=1)
     sns.heatmap(effect_mat, mask=mask, cmap='RdBu_r', center=0,
@@ -222,7 +188,7 @@ for band in FREQUENCY_BANDS:
     plt.close()
     print(f"  Saved effect_size_heatmap.png")
 
-    # Figure 3: Bar plot of significant counts
+    
     plt.figure(figsize=(6, 4))
     counts = [len(sig_df), len(df) - len(sig_df)]
     labels = ['Significant', 'Non-significant']
