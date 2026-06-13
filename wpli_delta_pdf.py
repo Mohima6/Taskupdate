@@ -5,11 +5,8 @@ from matplotlib.backends.backend_pdf import PdfPages
 import json
 from PIL import Image
 
-# ========== CONFIGURATION ==========
-# Set the folder where your wPLI Delta result files are located
 BASE_PATH = r"C:\Users\mohimaCHAKRABORTY\Taskupdate\machine_learning\results\wPLI\delta"
 
-# File names (must exist in BASE_PATH)
 MODEL_COMPARISON_FILE = "model_comparison.csv"
 CLASSIFIER_FILES = {
     "LogisticRegression": "LogisticRegression_classification_report.csv",
@@ -36,7 +33,6 @@ IMAGE_FILES = {
 
 OUTPUT_PDF = os.path.join(BASE_PATH, "wPLI_delta_classification_report.pdf")
 
-# ========== HELPER FUNCTIONS ==========
 def load_classification_report(csv_path):
     df = pd.read_csv(csv_path, index_col=0)
     return df
@@ -85,14 +81,14 @@ def embed_image(ax, img_path, title):
         ax.set_title(title, fontsize=10)
         return False
 
-# ========== MAIN ==========
+
 print("Generating PDF report for wPLI Delta band...")
 print(f"Looking for files in: {BASE_PATH}")
 
 if not os.path.exists(BASE_PATH):
     raise FileNotFoundError(f"Base path does not exist: {BASE_PATH}")
 
-# 1. Load model comparison
+
 model_comp_path = os.path.join(BASE_PATH, MODEL_COMPARISON_FILE)
 if not os.path.exists(model_comp_path):
     raise FileNotFoundError(f"Model comparison file not found: {model_comp_path}")
@@ -100,7 +96,7 @@ if not os.path.exists(model_comp_path):
 model_comp = pd.read_csv(model_comp_path, index_col=0)
 model_comp.index.name = 'Classifier'
 
-# 2. Load classification reports
+
 classifier_reports = {}
 for clf, fname in CLASSIFIER_FILES.items():
     full_path = os.path.join(BASE_PATH, fname)
@@ -109,16 +105,15 @@ for clf, fname in CLASSIFIER_FILES.items():
     else:
         print(f"Warning: {full_path} not found, skipping {clf}")
 
-# 3. Load best params
+
 best_params = {}
 for clf, fname in BEST_PARAMS_FILES.items():
     full_path = os.path.join(BASE_PATH, fname)
     if os.path.exists(full_path):
         best_params[clf] = load_best_params(full_path)
 
-# Create PDF
 with PdfPages(OUTPUT_PDF) as pdf:
-    # Page 1: Model Comparison
+    
     fig, ax = plt.subplots(figsize=(12, 4))
     display_cols = ['accuracy', 'sensitivity', 'specificity', 'precision', 'f1_score', 'roc_auc']
     existing_cols = [c for c in display_cols if c in model_comp.columns]
@@ -128,7 +123,7 @@ with PdfPages(OUTPUT_PDF) as pdf:
     pdf.savefig(fig)
     plt.close()
 
-    # Pages for each classifier
+    
     for clf, df_report in classifier_reports.items():
         param_str = best_params.get(clf, "N/A")
         title = f"{clf} - Classification Report\nBest parameters (first fold): {param_str}"
@@ -141,7 +136,7 @@ with PdfPages(OUTPUT_PDF) as pdf:
         pdf.savefig(fig)
         plt.close()
 
-        # Optional: add a page with confusion matrix and ROC curve
+        
         img_files = IMAGE_FILES.get(clf, [])
         if any(os.path.exists(os.path.join(BASE_PATH, img)) for img in img_files):
             fig, axes = plt.subplots(1, 2, figsize=(10, 4))
@@ -152,7 +147,7 @@ with PdfPages(OUTPUT_PDF) as pdf:
             pdf.savefig(fig)
             plt.close()
 
-    # Optional: Best params summary page
+    
     if best_params:
         fig, ax = plt.subplots(figsize=(12, 2 + 0.5 * len(best_params)))
         params_df = pd.DataFrame(list(best_params.items()), columns=['Classifier', 'Best Params (first fold)'])
